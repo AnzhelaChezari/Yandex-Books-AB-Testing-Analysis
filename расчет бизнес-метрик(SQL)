@@ -1,0 +1,107 @@
+1) Расчёт MAU авторов
+
+SELECT main_author_name,
+       COUNT(DISTINCT puid) as "mau"
+FROM bookmate.audition ba
+JOIN bookmate.content bc ON ba.main_content_id = bc.main_content_id
+JOIN bookmate.author bat ON bc.main_author_id = bat.main_author_id
+WHERE CAST(msk_business_dt_str AS timestamp) >= '2024-11-01' 
+  AND msk_business_dt_str::timestamp < '2024-12-01'
+GROUP BY main_author_name
+ORDER BY mau DESC
+LiMIT 3;
+
+2) Расчёт MAU произведений
+
+SELECT main_content_name,
+       published_topic_title_list,
+       main_author_name,
+       COUNT(DISTINCT puid) as "mau"
+FROM bookmate.audition ba
+JOIN bookmate.content bc ON ba.main_content_id = bc.main_content_id
+JOIN bookmate.author bat ON bc.main_author_id = bat.main_author_id
+WHERE CAST(msk_business_dt_str AS timestamp) >= '2024-11-01' 
+  AND msk_business_dt_str::timestamp < '2024-12-01'
+GROUP BY main_content_name, main_author_name, published_topic_title_list
+ORDER BY mau DESC
+LiMIT 3;   
+
+3) Расчёт Retention Rate
+
+WITH 
+new_users AS (
+    SELECT puid,
+           msk_business_dt_str          
+    FROM bookmate.audition
+    WHERE msk_business_dt_str::date = '2024-12-02'),
+active_users AS (
+   SELECT puid,
+           msk_business_dt_str
+    FROM bookmate.audition
+    WHERE msk_business_dt_str::date > '2024-10-02'
+),
+daily_retention AS (
+SELECT n.puid,
+       n.msk_business_dt_str AS first_day,
+       a.msk_business_dt_str,       
+a.msk_business_dt_str::date - n.msk_business_dt_str::date AS day_since_install
+FROM new_users n
+JOIN active_users a
+on n.puid = a.puid
+WHERE DATE(a.msk_business_dt_str) >= '2024-12-02')
+SELECT day_since_install,
+       COUNT(DISTINCT puid) AS retained_users,
+       ROUND(1.0 * COUNT(DISTINCT puid)/MAX(COUNT(DISTINCT puid)) OVER (PARTITION BY first_day ORDER by day_since_install),2) AS retention_rate
+FROM daily_retention
+GROUP BY 1,first_day
+ORDER BY 1 
+;
+
+4) Расчёт LTV
+
+WITH users_activity_month AS (
+       SELECT puid,
+       bg.usage_geo_id_name AS city,
+       COUNT(DISTINCT DATE_TRUNC('month', msk_business_dt_str::date)) AS active_month
+FROM bookmate.audition ba
+JOIN bookmate.geo bg ON ba.usage_geo_id = bg.usage_geo_id
+WHERE usage_geo_id_name in ('Москва', 'Санкт-Петербург')
+GROUP BY puid, bg.usage_geo_id_name
+)
+SELECT city,
+       COUNT(DISTINCT puid) AS total_users,
+       ROUND((SUM(active_month)*399)/COUNT(DISTINCT puid),2) AS ltv
+FROM users_activity_month
+GROUP BY city
+;
+
+5) Расчёт средней выручки прослушанного часа — аналог среднего чека
+
+WITH monthly_data AS (
+    SELECT 
+        DATE_TRUNC('month', msk_business_dt_str::timestamp)::date AS month,
+        COUNT(DISTINCT puid) AS mau,
+        ROUND(SUM(hours), 2) AS hours
+    FROM bookmate.audition
+    WHERE msk_business_dt_str::date >= '2024-09-01' 
+      AND msk_business_dt_str::date < '2024-12-01'
+    GROUP BY DATE_TRUNC('month', msk_business_dt_str::timestamp)::date
+)
+SELECT 
+    month,
+    mau,
+    hours,
+    ROUND((mau * 399) / NULLIF(hours, 0), 2) AS avg_hour_rev
+FROM monthly_data
+ORDER BY month;
+
+
+
+
+
+
+ 
+
+
+
+
